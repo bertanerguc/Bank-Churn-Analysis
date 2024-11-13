@@ -37,8 +37,5 @@ This Streamlit application predicts customer churn and suggests tailored campaig
 The application expects the uploaded CSV file to contain columns similar to the following:
 - `RowNumber`, `CustomerId`, `Surname`, `Exited` (target column), along with other features relevant for predicting churn.
 
-## Installation and Usage
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/Bank_Churn_Prediction.git
+License
+This project is licensed under the MIT License.
