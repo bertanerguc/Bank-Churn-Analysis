@@ -1,155 +1,1152 @@
+################################################
+# Random Forests, GBM, XGBoost, LightGBM, CatBoost
+################################################
+
+#pratikte bu yontemler kullanilirken de veri on isleme, ozellik muhendisligi gibi surecler tamamlandiktan sonra hiperparametre optimizasyonlari vb. islemlerle devam edilir.
+
+import warnings
+import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib import pyplot as plt
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+from sklearn.model_selection import GridSearchCV, cross_validate, RandomizedSearchCV, validation_curve
+from sklearn.preprocessing import StandardScaler
 
-file_path = "Banka Danismanlik Hizmeti/Customer Churn Classification.csv"
-data = pd.read_csv(file_path)
+pip install xgboost
 
+pip install catboost
+
+pip install lightgbm
+
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 
 pd.set_option('display.max_columns', None)
-pd.set_option('display.width', None)
-pd.set_option('display.max_rows', 20)
-pd.set_option('display.float_format', lambda x: '%.3f' % x)
+pd.set_option('display.width', 500)
 
-data.head()
-data.info()
+warnings.simplefilter(action='ignore', category=Warning)
 
-data.isnull().sum()
+df = pd.read_csv("Banka Danismanlik Hizmeti/Customer Churn Classification.csv")
 
-# Tenure_Group sütununda en sık tekrarlanan kategoriyi bulup onunla dolduruyoruz
-most_frequent_value = data['Tenure_Group'].mode()[0]
-print(f"En Sık Görülen Kategori: {most_frequent_value}")
+df.head()
 
-data['Tenure_Group'].fillna(most_frequent_value, inplace=True)
-data.isnull().sum()
+df.tail()
 
-# Cinsiyet ve müşteri kaybı arasındaki ilişki
-gender_churn = pd.crosstab(data['Gender'], data['Exited'], normalize='index') * 100
-print(gender_churn)
+df.info()
 
-gender_churn.plot(kind='bar', stacked=True)
-plt.title('Cinsiyet ve Müşteri Kaybı')
-plt.xlabel('Cinsiyet')
-plt.ylabel('Yüzde')
-plt.show()
+df.isnull().sum()
 
-# Ülke ve müşteri kaybı arasındaki ilişki
-geo_churn = pd.crosstab(data['Geography'], data['Exited'], normalize='index') * 100
-print(geo_churn)
+df[df["Tenure_Group"].isnull()][["Tenure_Months", "Tenure_Group"]]
 
-geo_churn.plot(kind='bar', stacked=True)
-plt.title('Ülke ve Müşteri Kaybı')
-plt.xlabel('Ülke')
-plt.ylabel('Yüzde')
-plt.show()
+df["Tenure_Group"].value_counts()
 
-# Yaşa göre müşteri kaybı dağılımı
-# Thresholdlari budayalim 5,95
-plt.figure(figsize=(10, 5))
-sns.boxplot(x='Exited', y='Age', data=data)
-plt.title('Yaş ve Müşteri Kaybı')
-plt.show()
+df["Tenure_Group"].unique()
 
-# Bakiye ve müşteri kaybı arasındaki ilişki
-plt.figure(figsize=(10, 5))
-sns.boxplot(x='Exited', y='Balance', data=data)
-plt.title('Bakiye ve Müşteri Kaybı')
-plt.show()
+df.groupby('Tenure_Group')['Tenure_Months'].describe().reset_index()
 
-# Aldigim hata ( bazi soyadlarini korelasyon analizinde grafige eklemeye calistigi icin)
-# sayisal sutunlari secme islemi yaptim.
-numeric_columns = data.select_dtypes(include=['float64', 'int64'])
+#Tenure_months = 0 olanlari 0-1 year'a atama
+df.loc[df['Tenure_Months'] == 0, 'Tenure_Group'] = '0-1 year'
 
-# Korelasyon matrisi
-corr_matrix = numeric_columns.corr()
-print(corr_matrix['Exited'].sort_values(ascending=False))
+df.groupby("Exited").agg({"Age":"mean"})
 
-# Korelasyon matrisi grafiği
+#Tenure_years degiskeni ekleyelim.
+df['NEW_Tenure_Years'] = df['Tenure_Months'].apply(lambda x: x/12)
 
-plt.figure(figsize=(10, 8))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1)
-plt.title('Korelasyon Matrisi')
-plt.show()
+df.head()
 
-from sklearn.ensemble import RandomForestClassifier
+df['NEW_Tenure_Years'].describe().T
+
+#Product_per_tenure degiskenini ekleyelim.
+df['NEW_Product_per_Tenure_Years'] = df['NEW_Tenure_Years'] /  df['NumOfProducts']
+
+df.head()
+
+#Credit_Score_Category inceleme
+
+df['Credit_Score_Category'].value_counts()
+
+#label_encoder'dan gecirelim
+#ancak alfabetik olarak ilk gordugu degere 0 verecek, ancak biz Good = 1, Fair = 2, Excelent = 3 olsun istiyoruz.
+
+credit_score_map = {'Fair': 1, 'Good': 2, 'Excellent': 3}
+
+df['NEW_Credit_Score_Label'] = df['Credit_Score_Category'].map(credit_score_map)
+
+df.head()
+
+df['NEW_Age_by_Credit_Score'] = df['Age'] * df['NEW_Credit_Score_Label'].astype(int)
+
+df.head()
+
+#GENDER
+df.loc[(df['Gender'] == 'Male') & (df['Age'] <= 21), 'NEW_GENDER_CAT'] = 'Youngmale'
+df.loc[(df['Gender'] == 'Male') & (df['Age'] > 21) & (df['Age'] < 50), 'NEW_GENDER_CAT'] = 'Maturemale'
+df.loc[(df['Gender'] == 'Male') & (df['Age'] >= 50), 'NEW_GENDER_CAT'] = 'Seniormale'
+df.loc[(df['Gender'] == 'Female') & (df['Age'] <= 21), 'NEW_GENDER_CAT'] = 'Youngfemale'
+df.loc[(df['Gender'] == 'Female') & (df['Age'] > 21) & (df['Age'] < 50), 'NEW_GENDER_CAT'] = 'Maturefemale'
+df.loc[(df['Gender'] == 'Female') & (df['Age'] >= 50), 'NEW_GENDER_CAT'] = 'Seniorfemale'
+
+df.head()
+
+#Active_by_creditcard --> kredi karti oldugu icin mi aktif
+df['NEW_Active_by_CreditCard'] = df['HasCrCard'].map({'Yes': 1, 'No': 0}).astype(int) * df['IsActiveMember'].map({'Yes': 1, 'No':0}).astype(int)
+
+df.head()
+
+#Loyalty score by year
+df['NEW_Loyalty_Score_by_Year'] = df['Loyalty_Score'] / df['NEW_Tenure_Years']
+
+df.head()
+
+df.info()
+
+df[df["NEW_Loyalty_Score_by_Year"].isnull()]
+
+df[df['Tenure_Months'] == 0]['Exited'].value_counts()
+
+df = df.drop(['NEW_Loyalty_Score_by_Year'], axis = 1)
+
+df.info()
+
+#grab col_names tekrar calistir
+def grab_col_names(dataframe, cat_th=10, car_th=20):
+    """
+
+    Veri setindeki kategorik, numerik ve kategorik fakat kardinal değişkenlerin isimlerini verir.
+    Not: Kategorik değişkenlerin içerisine numerik görünümlü kategorik değişkenler de dahildir.
+
+    Parameters
+    ------
+        dataframe: dataframe
+                Değişken isimleri alınmak istenilen dataframe
+        cat_th: int, optional
+                numerik fakat kategorik olan değişkenler için sınıf eşik değeri
+        car_th: int, optinal
+                kategorik fakat kardinal değişkenler için sınıf eşik değeri
+
+    Returns
+    ------
+        cat_cols: list
+                Kategorik değişken listesi
+        num_cols: list
+                Numerik değişken listesi
+        cat_but_car: list
+                Kategorik görünümlü kardinal değişken listesi
+
+    Examples
+    ------
+        import seaborn as sns
+        df = sns.load_dataset("iris")
+        print(grab_col_names(df))
+
+
+    Notes
+    ------
+        cat_cols + num_cols + cat_but_car = toplam değişken sayısı
+        num_but_cat cat_cols'un içerisinde.
+        Return olan 3 liste toplamı toplam değişken sayısına eşittir: cat_cols + num_cols + cat_but_car = değişken sayısı
+
+    """
+
+    # cat_cols, cat_but_car
+    cat_cols = [col for col in dataframe.columns if dataframe[col].dtypes == "O"]
+    num_but_cat = [col for col in dataframe.columns if dataframe[col].nunique() < cat_th and
+                   dataframe[col].dtypes != "O"]
+    cat_but_car = [col for col in dataframe.columns if dataframe[col].nunique() > car_th and
+                   dataframe[col].dtypes == "O"]
+    cat_cols = cat_cols + num_but_cat
+    cat_cols = [col for col in cat_cols if col not in cat_but_car]
+
+    # num_cols
+    num_cols = [col for col in dataframe.columns if dataframe[col].dtypes != "O"]
+    num_cols = [col for col in num_cols if col not in num_but_cat]
+
+    # print(f"Observations: {dataframe.shape[0]}")
+    # print(f"Variables: {dataframe.shape[1]}")
+    # print(f'cat_cols: {len(cat_cols)}')
+    # print(f'num_cols: {len(num_cols)}')
+    # print(f'cat_but_car: {len(cat_but_car)}')
+    # print(f'num_but_cat: {len(num_but_cat)}')
+    return cat_cols, num_cols, cat_but_car, num_but_cat
+
+df[df['Tenure_Months'] < 96]
+
+#Tenure_months = 0 olanlari 0-1 year'a atama
+#yukarida yapmistik
+#df.loc[df['Tenure_Months'] == 0, 'Tenure_Group'] = '0-1 year'
+
+#df["Tenure_Group"].value_counts()
+
+cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(df, cat_th=5, car_th=20)
+
+cat_cols
+
+num_cols
+
+cat_but_car
+
+num_but_cat
+
+#one_hot'tan gecirmeden once Exited'i cat_cols'dan cikaralim.
+cat_cols = [col for col in cat_cols if col != 'Exited']
+
+cat_cols
+
+df.head()
+
+def one_hot_encoder(dataframe, categorical_cols, drop_first=False):
+    dataframe = pd.get_dummies(dataframe, columns=categorical_cols, drop_first=drop_first)
+    #get_dummies metoduna categoric degisken listesini verdigimizde ve drop_first = True dedigimizde 2 sinifli kategorik degiskenleri de
+    #label_encoder'a sokabiliyor olacagiz. (ilk sinifi drop ettiginde dummy degisken tuzagindan kurtuluyor olacak)
+    return dataframe
+
+df = one_hot_encoder(df, cat_cols, drop_first=True)
+
+df.head()
+
+# Standartlaştırma
+X_scaled = StandardScaler().fit_transform(df[num_cols])
+df[num_cols] = pd.DataFrame(X_scaled, columns=df[num_cols].columns) #X_scaled'i dataframe'e geri atiyoruz.
+
+df.head()
+
+y = df["Exited"]
+X = df.drop(["Exited", "RowNumber", "CustomerId", "Surname" ], axis=1)
+
+X.head()
+
+#SON MODELLER BURADAN BASLIYOR!!!
+
+# XGBoost
+
+#SMOTE with XGBoost - NEW
+#fit with best_params
+#scores with best_params
+#scores on test data set
+
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from xgboost import XGBClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
-# Kullanılacak sütunları seçiyoruz (Sayısal ve kategorik sütunları düzenliyoruz)
-X = data.drop(['RowNumber', 'CustomerId', 'Surname', 'Exited'], axis=1)
-
-# Kategorik değişkenleri one-hot encoding ile sayısal hale getirelim
-X = pd.get_dummies(X, drop_first=True)
-
-# Hedef değişken
-y = data['Exited']
-
-# cross validation yapalim!!
+# Split your data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42, stratify=y)
 
 
+# Define the pipeline with SMOTE and XGBoost
+pipeline = Pipeline([
+    ('smote', SMOTE(random_state=42)),  
+    ('classifier', XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42))
+])
 
-
-
-
-
-# Veriyi eğitim ve test olarak bölelim
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-
-# Random Forest modelini eğitelim
-model = RandomForestClassifier(random_state=42)
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
-
-from sklearn.metrics import classification_report, confusion_matrix
-
-# Performans metriklerini ekrana yazdıralım
-print("Sınıflandırma Raporu:\n", classification_report(y_test, y_pred))
-
-# Confusion Matrix (Karmaşıklık Matrisi)
-conf_matrix = confusion_matrix(y_test, y_pred)
-print("Karmaşıklık Matrisi:\n", conf_matrix)
-
-# Test verisindeki churn olacak müşterileri işaretleyelim
-X_test['Churn Tahmini'] = y_pred
-churn_customers = X_test[X_test['Churn Tahmini'] == 1]
-
-# Churn olacak müşterileri ekrana yazdıralım
-print("\nChurn Olacak Müşteriler:")
-print(churn_customers)
-
-#Adım Adım Model Optimizasyonu
-
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV
-
-# Hiperparametre aralıklarını belirleyelim
+# Define the parameter grid for XGBoost
 param_grid = {
-    'n_estimators': [100, 200, 300],      # Ağaç sayısı
-    'max_depth': [None, 10, 20, 30],      # Maksimum derinlik
-    'min_samples_split': [2, 5, 10],      # Bölünme için minimum örnek sayısı
-    'min_samples_leaf': [1, 2, 4]         # Yaprak düğümlerindeki minimum örnek sayısı
+    'classifier__n_estimators': [100, 200],
+    'classifier__max_depth': [3, 5, 7],
+    'classifier__learning_rate': [0.01, 0.1],
+    'classifier__scale_pos_weight': [1, 2, 5]  
 }
 
-# Random Forest modeli ve GridSearchCV ile hiperparametre araması
-rf = RandomForestClassifier(random_state=42)
-grid_search = GridSearchCV(estimator=rf, param_grid=param_grid,
-                           cv=5, n_jobs=-1, verbose=2)
+# Define stratified k-fold cross-validation
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-# Eğitim verisiyle en iyi parametreleri bulalım
+# Define multiple scoring metrics
+scoring = {
+    'accuracy': 'accuracy',
+    'precision': 'precision',
+    'recall': 'recall',
+    'f1': 'f1',
+    'roc_auc': 'roc_auc'
+}
+
+# Set up GridSearchCV with the pipeline, parameter grid, and multiple scoring metrics
+grid_search = GridSearchCV(
+    estimator=pipeline,
+    param_grid=param_grid,
+    scoring=scoring,
+    refit='f1',  # Use F1-score to determine the best model
+    cv=cv,
+    n_jobs=-1
+)
+
+# Run the grid search on training data
 grid_search.fit(X_train, y_train)
 
-# En iyi parametreleri ve puanı ekrana yazdıralım
-print(f"En İyi Parametreler: {grid_search.best_params_}")
-print(f"En İyi Skor: {grid_search.best_score_}")
+# Get the best parameters and print each metric for the best estimator
+print("Best Parameters:", grid_search.best_params_)
+print("\nBest Cross-Validated Scores:")
+
+# Extract and print the scores for each metric
+best_index = grid_search.best_index_
+results = grid_search.cv_results_
+print("Accuracy:", results['mean_test_accuracy'][best_index])
+print("Precision:", results['mean_test_precision'][best_index])
+print("Recall:", results['mean_test_recall'][best_index])
+print("F1 Score:", results['mean_test_f1'][best_index])
+print("ROC-AUC Score:", results['mean_test_roc_auc'][best_index])
+
+# Refit the final model on the entire dataset using the best parameters
+best_params = grid_search.best_params_
+
+# Create the final pipeline with best parameters
+final_model = Pipeline([
+    ('smote', SMOTE(random_state=42)),
+    ('classifier', XGBClassifier(
+        n_estimators=best_params['classifier__n_estimators'],
+        max_depth=best_params['classifier__max_depth'],
+        learning_rate=best_params['classifier__learning_rate'],
+        scale_pos_weight=best_params['classifier__scale_pos_weight'],
+        use_label_encoder=False,
+        eval_metric='logloss',
+        random_state=42
+    ))
+])
 
 
-from sklearn.model_selection import cross_val_score
 
-# 5 katlı çapraz doğrulama ile Random Forest modelinin performansını ölçelim
-rf_best = grid_search.best_estimator_
-cv_scores = cross_val_score(rf_best, X_train, y_train, cv=5)
+# Fit the final model on train dataset
+final_model.fit(X_train, y_train)
 
-print(f"Çapraz Doğrulama Skorları: {cv_scores}")
-print(f"Ortalama CV Skoru: {cv_scores.mean()}")
+print("\nModel has been refitted with the best parameters on the train dataset.")
+
+# # Predict on the test set
+y_pred = final_model.predict(X_test)
+y_proba = final_model.predict_proba(X_test)[:, 1]  # Get probability scores for ROC-AUC
+
+# Calculate and print the final scores
+print("\nFinal Scores on the test Dataset:")
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Precision:", precision_score(y_test, y_pred))
+print("Recall:", recall_score(y_test, y_pred))
+print("F1 Score:", f1_score(y_test, y_pred))
+print("ROC-AUC Score:", roc_auc_score(y_test, y_proba))
+
+#LIGHTGBM
+
+#SMOTE with LightGBM
+#fit with best_params
+#scores with best_params
+#scores on test data set
+
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+
+# Split your data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42, stratify=y)
+
+# Define the pipeline with SMOTE and LightGBM
+pipeline = Pipeline([
+    ('smote', SMOTE(random_state=42)),  
+    ('classifier', LGBMClassifier(random_state=42))
+])
+
+# Define the parameter grid for LightGBM
+param_grid = {
+    'classifier__n_estimators': [50, 100, 200],
+    'classifier__max_depth': [3, 5, 7],
+    'classifier__learning_rate': [0.01, 0.1],
+    'classifier__class_weight': ['balanced', None]  # Option for handling class imbalance within LightGBM
+}
+
+# Define stratified k-fold cross-validation
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+# Define multiple scoring metrics
+scoring = {
+    'accuracy': 'accuracy',
+    'precision': 'precision',
+    'recall': 'recall',
+    'f1': 'f1',
+    'roc_auc': 'roc_auc'
+}
+
+# Set up GridSearchCV with the pipeline, parameter grid, and multiple scoring metrics
+grid_search = GridSearchCV(
+    estimator=pipeline,
+    param_grid=param_grid,
+    scoring=scoring,
+    refit='f1',  # Use F1-score to determine the best model
+    cv=cv,
+    n_jobs=-1
+)
+
+# Run the grid search on training data
+grid_search.fit(X_train, y_train)
+
+# Get the best parameters and print each metric for the best estimator
+print("Best Parameters:", grid_search.best_params_)
+print("\nBest Cross-Validated Scores:")
+
+# Extract and print the scores for each metric
+best_index = grid_search.best_index_
+results = grid_search.cv_results_
+print("Accuracy:", results['mean_test_accuracy'][best_index])
+print("Precision:", results['mean_test_precision'][best_index])
+print("Recall:", results['mean_test_recall'][best_index])
+print("F1 Score:", results['mean_test_f1'][best_index])
+print("ROC-AUC Score:", results['mean_test_roc_auc'][best_index])
+
+# Refit the final model on the entire dataset using the best parameters
+best_params = grid_search.best_params_
+
+# Create the final pipeline with best parameters
+final_model = Pipeline([
+    ('smote', SMOTE(random_state=42)),
+    ('classifier', LGBMClassifier(
+        n_estimators=best_params['classifier__n_estimators'],
+        max_depth=best_params['classifier__max_depth'],
+        learning_rate=best_params['classifier__learning_rate'],
+        class_weight=best_params['classifier__class_weight'],
+        random_state=42
+    ))
+])
+
+# Fit the final model on the train dataset
+final_model.fit(X_train, y_train)
+
+print("\nModel has been refitted with the best parameters on the train dataset.")
+
+# # Predict on the test data set
+y_pred = final_model.predict(X_test)
+y_proba = final_model.predict_proba(X_test)[:, 1]  # Get probability scores for ROC-AUC
+
+# Calculate and print the final scores
+print("\nFinal Scores on the test Dataset:")
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Precision:", precision_score(y_test, y_pred))
+print("Recall:", recall_score(y_test, y_pred))
+print("F1 Score:", f1_score(y_test, y_pred))
+print("ROC-AUC Score:", roc_auc_score(y_test, y_proba))
+
+#CATBOOST
+
+#SMOTE with CatBoost
+#fit with best_params
+#scores with best_params
+#scores on test data
+
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from catboost import CatBoostClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+
+# Split your data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42, stratify=y)
+
+# Define the pipeline with SMOTE and CatBoost
+pipeline = Pipeline([
+    ('smote', SMOTE(random_state=42)),  
+    ('classifier', CatBoostClassifier(verbose=0, random_state=42))  # Suppress verbose output
+])
+
+# Define the parameter grid for CatBoost
+param_grid = {
+    'classifier__iterations': [100, 200],
+    'classifier__depth': [3, 5, 7],
+    'classifier__learning_rate': [0.01, 0.1],
+    'classifier__scale_pos_weight': [1, 2, 5]  # Handle class imbalance with scale_pos_weight
+}
+
+# Define stratified k-fold cross-validation
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+# Define multiple scoring metrics
+scoring = {
+    'accuracy': 'accuracy',
+    'precision': 'precision',
+    'recall': 'recall',
+    'f1': 'f1',
+    'roc_auc': 'roc_auc'
+}
+
+# Set up GridSearchCV with the pipeline, parameter grid, and multiple scoring metrics
+grid_search = GridSearchCV(
+    estimator=pipeline,
+    param_grid=param_grid,
+    scoring=scoring,
+    refit='f1',  # Use F1-score to determine the best model
+    cv=cv,
+    n_jobs=-1
+)
+
+# Run the grid search on training data
+grid_search.fit(X_train, y_train)
+
+# Get the best parameters and print each metric for the best estimator
+print("Best Parameters:", grid_search.best_params_)
+print("\nBest Cross-Validated Scores:")
+
+# Extract and print the scores for each metric
+best_index = grid_search.best_index_
+results = grid_search.cv_results_
+print("Accuracy:", results['mean_test_accuracy'][best_index])
+print("Precision:", results['mean_test_precision'][best_index])
+print("Recall:", results['mean_test_recall'][best_index])
+print("F1 Score:", results['mean_test_f1'][best_index])
+print("ROC-AUC Score:", results['mean_test_roc_auc'][best_index])
+
+# Refit the final model on the entire dataset using the best parameters
+best_params = grid_search.best_params_
+
+# Create the final pipeline with best parameters
+final_model = Pipeline([
+    ('smote', SMOTE(random_state=42)),
+    ('classifier', CatBoostClassifier(
+        iterations=best_params['classifier__iterations'],
+        depth=best_params['classifier__depth'],
+        learning_rate=best_params['classifier__learning_rate'],
+        scale_pos_weight=best_params['classifier__scale_pos_weight'],
+        verbose=0,
+        random_state=42
+    ))
+])
+
+# Fit the final model on train dataset
+final_model.fit(X_train, y_train)
+
+print("\nModel has been refitted with the best parameters on the training dataset.")
+
+# Predict on the test set
+y_pred = final_model.predict(X_test)
+y_proba = final_model.predict_proba(X_test)[:, 1]  # Get probability scores for ROC-AUC
+
+# Calculate and print the final scores
+print("\nFinal Scores on the test Dataset:")
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Precision:", precision_score(y_test, y_pred))
+print("Recall:", recall_score(y_test, y_pred))
+print("F1 Score:", f1_score(y_test, y_pred))
+print("ROC-AUC Score:", roc_auc_score(y_test, y_proba))
+
+#RANDOMFOREST
+
+#SMOTE with RandomForest
+#fit with best_params
+#scores with best_params
+#scores on test data
+
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+
+# Split your data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42, stratify=y)
+
+# Define the pipeline with SMOTE and RandomForestClassifier
+pipeline = Pipeline([
+    ('smote', SMOTE(random_state=42)),  
+    ('classifier', RandomForestClassifier(random_state=42))
+])
+
+# Define the parameter grid for Random Forest
+param_grid = {
+    'classifier__n_estimators': [100, 200],
+    'classifier__max_depth': [3, 5, 7],
+    'classifier__min_samples_split': [2, 5, 10],
+    'classifier__class_weight': ['balanced', 'balanced_subsample', None]  # Handle class imbalance with class_weight
+}
+
+# Define stratified k-fold cross-validation
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+# Define multiple scoring metrics
+scoring = {
+    'accuracy': 'accuracy',
+    'precision': 'precision',
+    'recall': 'recall',
+    'f1': 'f1',
+    'roc_auc': 'roc_auc'
+}
+
+# Set up GridSearchCV with the pipeline, parameter grid, and multiple scoring metrics
+grid_search = GridSearchCV(
+    estimator=pipeline,
+    param_grid=param_grid,
+    scoring=scoring,
+    refit='f1',  # Use F1-score to determine the best model
+    cv=cv,
+    n_jobs=-1
+)
+
+# Run the grid search on training data
+grid_search.fit(X_train, y_train)
+
+# Get the best parameters and print each metric for the best estimator
+print("Best Parameters:", grid_search.best_params_)
+print("\nBest Cross-Validated Scores:")
+
+# Extract and print the scores for each metric
+best_index = grid_search.best_index_
+results = grid_search.cv_results_
+print("Accuracy:", results['mean_test_accuracy'][best_index])
+print("Precision:", results['mean_test_precision'][best_index])
+print("Recall:", results['mean_test_recall'][best_index])
+print("F1 Score:", results['mean_test_f1'][best_index])
+print("ROC-AUC Score:", results['mean_test_roc_auc'][best_index])
+
+# Refit the final model on the entire dataset using the best parameters
+best_params = grid_search.best_params_
+
+# Create the final pipeline with best parameters
+final_model = Pipeline([
+    ('smote', SMOTE(random_state=42)),
+    ('classifier', RandomForestClassifier(
+        n_estimators=best_params['classifier__n_estimators'],
+        max_depth=best_params['classifier__max_depth'],
+        min_samples_split=best_params['classifier__min_samples_split'],
+        class_weight=best_params['classifier__class_weight'],
+        random_state=42
+    ))
+])
+
+# Fit the final model on train dataset
+final_model.fit(X_train, y_train)
+
+print("\nModel has been refitted with the best parameters on the training dataset.")
+
+# Make predictions on the dataset
+y_pred = final_model.predict(X_test)
+y_proba = final_model.predict_proba(X_test)[:, 1]  # Get probability scores for ROC-AUC
+
+# Calculate and print the final scores
+print("\nFinal Scores on the test Dataset:")
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Precision:", precision_score(y_test, y_pred))
+print("Recall:", recall_score(y_test, y_pred))
+print("F1 Score:", f1_score(y_test, y_pred))
+print("ROC-AUC Score:", roc_auc_score(y_test, y_proba))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from sklearn.ensemble import RandomForestClassifier
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+
+# Modeli Eğitin
+rf_final = RandomForestClassifier(n_estimators=100, max_depth=7, random_state=42)
+rf_final.fit(X_train, y_train)
+
+# Özellik Önemini Çizdirin
+def plot_importance(model, features):
+    feature_imp = pd.DataFrame({'Value': model.feature_importances_, 'Feature': features.columns})
+    plt.figure(figsize=(10, 10))
+    sns.barplot(x="Value", y="Feature", data=feature_imp.sort_values(by="Value", ascending=False))
+    plt.title('Özellik Önem Düzeyleri')
+    plt.tight_layout()
+    plt.show()
+
+plot_importance(rf_final, X)
+
+
+def val_curve_params(model, X, y, param_name, param_range, scoring="roc_auc", cv=10):
+    train_score, test_score = validation_curve(
+        model, X=X, y=y, param_name=param_name, param_range=param_range, scoring=scoring, cv=cv)
+
+    mean_train_score = np.mean(train_score, axis=1)
+    mean_test_score = np.mean(test_score, axis=1)
+
+    plt.plot(param_range, mean_train_score,
+             label="Training Score", color='b')
+
+    plt.plot(param_range, mean_test_score,
+             label="Validation Score", color='g')
+
+    plt.title(f"Validation Curve for {type(model).__name__}")
+    plt.xlabel(f"Number of {param_name}")
+    plt.ylabel(f"{scoring}")
+    plt.tight_layout()
+    plt.legend(loc='best')
+    plt.show(block=True)
+
+val_curve_params(rf_final, X, y, "max_depth", range(1, 11), scoring="roc_auc")
+#bunu olusturmak biraz uzun surebilir, cunku forest'in en iyi modelinde 500 tane agac var, her bir olasi derinlik parametresi icin
+#500 tane agac fit ediliyor. bir de cv yontemiyle degerlendiriyoruz, dolayisiyla islemler uzun surer.
+#train score'una gore; max_depth arttikca (agac daha dalli budakli hale geldikce) train skorlari yukselmis, yani train basarisi artmis
+#gorunuyor. ama ayni artis test setindeki auc skoru ayni siddetle artmiyor (ama bir noktaya kadar artmis). bir noktadan sonra da azalmaya
+#baslamis.
+
+################################################
+# GBM
+################################################
+
+#artik optimizasyonuna dayali calisan bir agac yontemidir.
+#agac yontemlerine 
+
+gbm_model = GradientBoostingClassifier(random_state=17)
+
+gbm_model.get_params()
+#learning_rate --> artık tahmin sonuclariyla modelin guncellenme hizi
+#n_estimators --> optimizasyon sayisi (boost ettik; kac defa ettik? 100 defa ettik)
+
+cv_results = cross_validate(gbm_model, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7591715474068416
+# @bertan benim aldigim sonuc 0.8640000000000001
+
+cv_results['test_precision'].mean()
+# 0.7728087083048638
+cv_results['test_recall'].mean()
+# 0.4722683913860385
+cv_results['test_f1'].mean()
+# 0.634
+# @bertan benim aldigim 0.5857594598218061
+cv_results['test_roc_auc'].mean()
+# 0.82548
+# @bertan benim aldigim 0.8662473391083415
+
+gbm_params = {"learning_rate": [0.01, 0.1],
+              "max_depth": [3, 8, 10],
+              "n_estimators": [100, 500, 1000],
+              "subsample": [1, 0.5, 0.7]}
+#learning rate ne kadar kucuk olursa train suresi o kadar uzar, ancak kucuk olunca daha basarili tahminler elde ederiz.
+#subsample --> bir bireysel base learner fit edilecegi zaman kac tane gozlemin oransal olarak goz onunde bulundurulacagini ifade eder.
+#yani butun gozlemleri mi kullanayim yoksa belirli bir miktarini mi dikkate alayim.
+#bunlari 1, %50 ve %70 olarak tanimladik.
+#hiperparametrelerin on tanimli degerlerini de ekliyoruz (ilk deger olarak bunlari ekledik)
+
+gbm_best_grid = GridSearchCV(gbm_model, gbm_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+gbm_best_grid.best_params_
+#vahit hoca'da max_dept: 3, n_estimators: 500, supsample: 0.7 cikti
+
+gbm_final = gbm_model.set_params(**gbm_best_grid.best_params_, random_state=17, ).fit(X, y)
+
+cv_results = cross_validate(gbm_final, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+################################################
+# XGBoost
+################################################
+
+xgboost_model = XGBClassifier(random_state=17, use_label_encoder=False)
+
+xgboost_model.get_params()
+
+cv_results = cross_validate(xgboost_model, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.75265
+# @bertan bendeki sonuc 0.8644999999999999
+cv_results['test_precision'].mean()
+# bendeki sonuc 0.7581240216587414
+cv_results['test_recall'].mean()
+# bendeki sonuc 0.49189430071783014
+cv_results['test_f1'].mean()
+# 0.631
+# bendeki sonuc 0.596428094130553
+cv_results['test_roc_auc'].mean()
+# 0.7987
+# bendeki sonuc 0.8620333297819057
+
+
+xgboost_params = {"learning_rate": [0.1, 0.01],
+                  "max_depth": [5, 8],
+                  "n_estimators": [100, 500, 1000],
+                  "colsample_bytree": [0.7, 1]}
+#colsample_bytree = subsample demek.
+#documentation'da soyle yaziyor: this is a family of parameters for subsampling of columns.
+
+xgboost_best_grid = GridSearchCV(xgboost_model, xgboost_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+xgboost_final = xgboost_model.set_params(**xgboost_best_grid.best_params_, random_state=17).fit(X, y)
+
+cv_results = cross_validate(xgboost_final, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+################################################
+# LightGBM
+################################################
+
+lgbm_model = LGBMClassifier(random_state=17)
+
+lgbm_model.get_params()
+
+cv_results = cross_validate(lgbm_model, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+lgbm_params = {"learning_rate": [0.01, 0.1],
+               "n_estimators": [100, 300, 500, 1000],
+               "colsample_bytree": [0.5, 0.7, 1]}
+
+lgbm_best_grid = GridSearchCV(lgbm_model, lgbm_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+lgbm_final = lgbm_model.set_params(**lgbm_best_grid.best_params_, random_state=17).fit(X, y)
+
+cv_results = cross_validate(lgbm_final, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+# Hiperparametre yeni değerlerle
+lgbm_params = {"learning_rate": [0.01, 0.02, 0.05, 0.1],
+               "n_estimators": [200, 300, 350, 400],
+               "colsample_bytree": [0.9, 0.8, 1]}
+
+lgbm_best_grid = GridSearchCV(lgbm_model, lgbm_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+lgbm_final = lgbm_model.set_params(**lgbm_best_grid.best_params_, random_state=17).fit(X, y)
+
+cv_results = cross_validate(lgbm_final, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+#lightGBM'de temel olarak diger parametreleri belirledikten sonra n_estimators sayisi 10.000'lere kadar denemeliyiz
+#n_estimators --> tahmin sayisi (iterasyon sayisi, yani boosting sayisi)
+# Hiperparametre optimizasyonu sadece n_estimators için.
+lgbm_model = LGBMClassifier(random_state=17, colsample_bytree=0.9, learning_rate=0.01)
+#daha once best params olarak belirlenen colsample_bytree ve learning_rate parametrelerinin degerlerini girdik.
+
+lgbm_params = {"n_estimators": [200, 400, 1000, 5000, 8000, 9000, 10000]}
+
+lgbm_best_grid = GridSearchCV(lgbm_model, lgbm_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+lgbm_final = lgbm_model.set_params(**lgbm_best_grid.best_params_, random_state=17).fit(X, y)
+
+cv_results = cross_validate(lgbm_final, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+#n_estimators icin en iyi paremetre degeri 200 olmus (Vahit Hoca'nin video'sunda)
+
+################################################
+# CatBoost
+################################################
+
+catboost_model = CatBoostClassifier(random_state=17, verbose=False)
+#catboost'un cirkin bir ciktisi var, o yuzden verbose = False yapiyoruz.
+
+cv_results = cross_validate(catboost_model, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+#bir hiperparametre optimizasyonu yapmadigimiz haliyle sonuclar lightGBM'den daha iyi gorunuyor.
+
+catboost_params = {"iterations": [200, 500],
+                   "learning_rate": [0.01, 0.1],
+                   "depth": [3, 6]}
+
+catboost_best_grid = GridSearchCV(catboost_model, catboost_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+catboost_final = catboost_model.set_params(**catboost_best_grid.best_params_, random_state=17).fit(X, y)
+
+cv_results = cross_validate(catboost_final, X, y, cv=5, scoring=["accuracy", "precision", "recall", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_precision'].mean()
+
+cv_results['test_recall'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+#sonuclar daha once kullandigimiz model yontemlerinin hepsinden daha yuksek bir auc skoru geldi.
+#0.8654287321507551
+################################################
+# Feature Importance
+################################################
+
+#kurdugumuz farkli modellerin feature importance'larini incelemek istiyoruz.
+#farkli modellere gore degisken onem duzeyleri degisiyor mu kontrol edecegiz.
+
+def plot_importance(model, features, num=len(X), save=False):
+    feature_imp = pd.DataFrame({'Value': model.feature_importances_, 'Feature': features.columns})
+    plt.figure(figsize=(10, 10))
+    sns.set(font_scale=1)
+    sns.barplot(x="Value", y="Feature", data=feature_imp.sort_values(by="Value",
+                                                                     ascending=False)[0:num])
+    plt.title('Features')
+    plt.tight_layout()
+    plt.show()
+    if save:
+        plt.savefig('importances.png')
+
+plot_importance(rf_final, X)
+
+plot_importance(gbm_final, X)
+
+plot_importance(xgboost_final, X)
+
+plot_importance(lgbm_final, X)
+#lightgbm'de ilk 3 degisti! 
+
+plot_importance(catboost_final, X)
+
+################################
+# Hyperparameter Optimization with RandomSearchCV (BONUS)
+################################
+
+#gridsearch, verilen bir setin olasi butun kombinasyonlarini tek tek deniyordu.
+#randomsearch ise verilen bir hiperparametre seti icerisinden rastgele secimler yapar ve bu secimleri arar.
+
+rf_model = RandomForestClassifier(random_state=17)
+
+rf_random_params = {"max_depth": np.random.randint(5, 50, 10),  #5'ten 50'ye kadar 10 tane random sayi olustur diyoruz
+                    "max_features": [3, 5, 7, "auto", "sqrt"],
+                    "min_samples_split": np.random.randint(2, 50, 20), #2'den 50'ye kadar 20 tane sayi olustur demisiz
+                    "n_estimators": [int(x) for x in np.linspace(start=200, stop=1500, num=10)]} #200'den 1500'e kadar 10 tane sayi olustur
+
+#gridsearch --> olasi tum kombinasyonlari denedigi icin daha uzun surer ama olasi en iyiyi kapsama ihtimali daha yuksektir.
+#randomsearch ise gridsearch'e gore daha fazla, daha genis bir hiperparametre adayi arasindan rastgele secim yapar, bu sectikleri
+#uzerinden tek tek deneme yapar.
+#genelde gridsearch daha uzun surdugunden dolayi randomsearch tercih edilebilir, edilmeli!
+#ONEMLI NOT: gidilecek yonu bilmiyorsak, ilgili algoritma uzerinde daha once detayli calisma imkani bulamadiysak once bir randomsearch
+#getirip, buraya cok genis bir hiperparametre seti getirip arama yapip burada buldugumuz optimum hiperparametreler etrafina yeni
+#degerler koyarak (daha az sayida yeni deger koyarak) gridsearch yonteminden gecirebiliriz.
+
+rf_random = RandomizedSearchCV(estimator=rf_model,
+                               param_distributions=rf_random_params,
+                               n_iter=100,  # denenecek parametre sayısı
+                               cv=3,
+                               verbose=True,
+                               random_state=42,
+                               n_jobs=-1)
+
+rf_random.fit(X, y)
+
+rf_random.best_params_
+#vahit hoca'da farkli degerler cikti!
+#buradaki degerlerin iyi mi kotu mu oldugunu nasil anlayabilirim? buna gore bir model kurarak anlayabiliriz.
+
+rf_random_final = rf_model.set_params(**rf_random.best_params_, random_state=17).fit(X, y)
+
+cv_results = cross_validate(rf_random_final, X, y, cv=5, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+
+cv_results['test_f1'].mean()
+
+cv_results['test_roc_auc'].mean()
+
+#bu gelen sonuclar oncekilerden kotu degil.
+
+################################
+# Analyzing Model Complexity with Learning Curves (BONUS)
+################################
+
+#daha genisten, daha farkli parametre setleri vererek auc degerine gore ogrenme egrilerini olusturarak modek karmasikligini
+#diger ifadesiyle overfit'e dusup dusmeme durumunu degerlendirecegiz.
+
+def val_curve_params(model, X, y, param_name, param_range, scoring="roc_auc", cv=10):
+    train_score, test_score = validation_curve(
+        model, X=X, y=y, param_name=param_name, param_range=param_range, scoring=scoring, cv=cv)
+
+    mean_train_score = np.mean(train_score, axis=1)
+    mean_test_score = np.mean(test_score, axis=1)
+
+    plt.plot(param_range, mean_train_score,
+             label="Training Score", color='b')
+
+    plt.plot(param_range, mean_test_score,
+             label="Validation Score", color='g')
+
+    plt.title(f"Validation Curve for {type(model).__name__}")
+    plt.xlabel(f"Number of {param_name}")
+    plt.ylabel(f"{scoring}")
+    plt.tight_layout()
+    plt.legend(loc='best')
+    plt.show(block=True)
+
+rf_val_params = [["max_depth", [5, 8, 15, 20, 30, None]],
+                 ["max_features", [3, 5, 7, "auto"]],
+                 ["min_samples_split", [2, 5, 8, 15, 20]],
+                 ["n_estimators", [10, 50, 100, 200, 500]]]
+
+rf_model = RandomForestClassifier(random_state=17)
+
+for i in range(len(rf_val_params)):
+    val_curve_params(rf_model, X, y, rf_val_params[i][0], rf_val_params[i][1])
+
+#max_depth'e gore train seti bir miktar basarisini surdurmus, test seti ise daha bastan beni kaybettin demis
+#ve duserek baslamis. dolayisiyla max_depth'in nerede olmasi gerektigi ile ilgili bir bilgi ediniyoruz sadece.
+
+#max_features --> burada train skorunda ciddi bir degisiklik yok.auc degeri hep 1 civarinda. ancak validasyon skorunda cesitli degisiklikler
+#var.
+
+#min_sample_split --> train seti hemen reaksiyon vermis. bolmelerde goz onunde bulundurulacak ornek sayisi arttikca (artik 5 tane varsa
+#bolme, 7 tane varsa bolme; bu artik son yaprak dedikce) train setinin auc degeri dusmeye baslamis, ama test setinin artmaya baslamis.
+#modelin genellenebilirligi test setindeki basariya gore bakildiginda, min_sample_split yukseldikce yukselmis gorunuyor.
+
+#n_estimators --> tahminci sayisi arttikca zaten train skorunda bir degisiklik yok, ancak test skorlarinda bir artma gozlemlenmis.
+
+
+#OZETLE; hiperparametre optimizasyonu ile olasi tum hiperparametrelerin o olasi kombinasyonlarinin bir arada gozlenmesi senaryosundaki
+#hatalara gore zaten secimimizi yapmistik ve bu secimlere karsi hangi noktada olabildigimizi bir de ogrenme egrileri ile degerlendirerek
+#bir ek bilgi edinmis olduk.
+
+rf_val_params[0][1]
+
+
+
+
+
+
+
+
 
 
 
