@@ -35,7 +35,7 @@ This Streamlit application predicts customer churn and suggests tailored campaig
 ## Example CSV Format
 
 The application expects the uploaded CSV file to contain columns similar to the following:
-- `RowNumber`, `CustomerId`, `Surname`, `Exited` (target column), along with other features relevant for predicting churn.
+- `Exited` (target column), along with other features relevant for predicting churn.
 
 ## License
 This project is licensed under the MIT License.
